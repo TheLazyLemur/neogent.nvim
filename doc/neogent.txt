@@ -1,0 +1,94 @@
+*neogent.txt*  Agentic AI assistant for Neovim
+
+Author:  Dan Rousseau
+Licence: MIT
+
+==============================================================================
+CONTENTS                                                    *neogent-contents*
+
+    1. Introduction ............................ |neogent-introduction|
+    2. Requirements ............................ |neogent-requirements|
+    3. Setup ................................... |neogent-setup|
+    4. Commands ................................ |neogent-commands|
+    5. Keymaps ................................. |neogent-keymaps|
+    6. Tools ................................... |neogent-tools|
+
+==============================================================================
+1. INTRODUCTION                                         *neogent-introduction*
+
+Neogent is an agentic AI assistant for Neovim. It connects to the Anthropic
+API and provides an AI that can autonomously use tools to complete coding
+tasks - reading files, searching code, making edits, and running commands.
+
+==============================================================================
+2. REQUIREMENTS                                         *neogent-requirements*
+
+- Neovim 0.10+
+- curl
+- ripgrep (rg)
+- ANTHROPIC_API_KEY environment variable
+
+==============================================================================
+3. SETUP                                                       *neogent-setup*
+
+Call the setup function with optional configuration: >lua
+
+    require("neogent").setup({
+        api_key = os.getenv("ANTHROPIC_API_KEY"),
+        model = "claude-sonnet-4-20250514",
+        max_tokens = 4096,
+        follow_agent = true,
+    })
+<
+
+Options:
+
+    api_key         API key for Anthropic (default: $ANTHROPIC_API_KEY)
+    model           Model to use (default: "claude-sonnet-4-20250514")
+    max_tokens      Maximum tokens in response (default: 4096)
+    follow_agent    Open files as agent reads them (default: true)
+
+==============================================================================
+4. COMMANDS                                                 *neogent-commands*
+
+:Neogent                                                            *:Neogent*
+    Toggle the Neogent UI.
+
+:NeogentOpen                                                    *:NeogentOpen*
+    Open the Neogent UI.
+
+:NeogentClose                                                  *:NeogentClose*
+    Close the Neogent UI.
+
+:NeogentClear                                                  *:NeogentClear*
+    Clear the current conversation.
+
+==============================================================================
+5. KEYMAPS                                                   *neogent-keymaps*
+
+In the Neogent UI:
+
+    <CR>        Send message (input buffer) / Accept changes (diff view)
+    q           Close UI / Reject changes (diff view)
+    c           Clear conversation
+    i           Focus input, enter insert mode
+    <Tab>       Cycle between panels
+    <Esc>       Cancel current request
+    <C-c>       Cancel current request
+
+==============================================================================
+6. TOOLS                                                       *neogent-tools*
+
+The AI agent has access to the following tools:
+
+    read_file           Read file contents with optional line range
+    write_file          Create new files (fails if file exists)
+    replace_lines       Edit existing files with diff review
+    search_files        Search file contents using ripgrep
+    list_files          Find files matching a glob pattern
+    run_command         Execute shell commands (with safety blocklist)
+    document_symbols    List LSP symbols in a file
+    workspace_symbols   Search LSP symbols across workspace
+
+==============================================================================
+vim:tw=78:ts=8:ft=help:norl:
