@@ -396,4 +396,15 @@ test("format_workspace_symbols handles missing location", function()
     assert_eq(result[1].line, nil, "line should be nil")
 end)
 
+-- Test load_skill tool is registered
+test("load_skill tool is registered", function()
+    package.loaded["neogent.tools"] = nil
+    package.loaded["neogent.skills"] = nil
+    local tools = require("neogent.tools")
+
+    local tool = tools.get("load_skill")
+    assert_eq(tool ~= nil, true, "load_skill tool should be registered")
+    assert_eq(tool.schema.name, "load_skill", "tool schema name should be load_skill")
+end)
+
 print("\n--- Tools Tests Complete ---\n")

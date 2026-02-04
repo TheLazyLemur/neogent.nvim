@@ -22,6 +22,7 @@ local default_config = {
     max_tokens = 4096,
     follow_agent = true, -- open files agent reads in a buffer
     inject_diagnostics = false, -- whether to inject LSP diagnostics into tool results
+    skills_paths = nil, -- additional skill directories (list)
 }
 
 function M.setup(opts)
@@ -33,6 +34,11 @@ function M.setup(opts)
         max_tokens = config.max_tokens,
     })
     tools.configure({ follow_agent = config.follow_agent })
+
+    -- Configure and discover skills
+    local skills = require("neogent.skills")
+    skills.configure({ paths = config.skills_paths })
+    skills.refresh()
 
     -- Set callback for tools to reopen agent after diffs
     tools.set_reopen_callback(function()
@@ -325,6 +331,10 @@ function M.clear()
     end
     state.messages = {}
     ui.clear()
+
+    -- Reset loaded skills on conversation clear
+    local skills = require("neogent.skills")
+    skills.clear_loaded()
 end
 
 return M

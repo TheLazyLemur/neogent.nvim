@@ -2,6 +2,7 @@
 local M = {}
 
 local tools = require("neogent.tools")
+local skills = require("neogent.skills")
 
 local config = {
     base_url = "https://api.anthropic.com/v1/messages",
@@ -46,11 +47,26 @@ function M.send(messages, on_chunk, on_done, on_error)
 
     local tool_schemas = tools.get_schemas()
 
+    -- Build system prompt with skills
+    local system_prompt = config.system_prompt
+
+    -- Add available skills
+    local available_xml = skills.generate_available_xml()
+    if available_xml ~= "" then
+        system_prompt = system_prompt .. "\n\n## Skills\nWhen a task matches an available skill, use the load_skill tool to get detailed instructions.\n\n" .. available_xml
+    end
+
+    -- Add loaded skills reminder
+    local loaded_xml = skills.generate_reminder_xml()
+    if loaded_xml ~= "" then
+        system_prompt = system_prompt .. "\n\n<system-reminder>\n" .. loaded_xml .. "\n</system-reminder>"
+    end
+
     local request_body = {
         model = config.model,
         max_tokens = config.max_tokens,
         stream = true,
-        system = config.system_prompt,
+        system = system_prompt,
         messages = messages,
     }
 

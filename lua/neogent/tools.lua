@@ -1361,4 +1361,31 @@ M.register("get_buffer", {
     return { success = true, message = msg }
 end)
 
+-- load_skill: load a skill to get detailed instructions
+M.register("load_skill", {
+    name = "load_skill",
+    description = "Load a skill to get detailed instructions for a specific task. Use when a task matches an available skill's description from <available-skills>.",
+    input_schema = {
+        type = "object",
+        properties = {
+            name = {
+                type = "string",
+                description = "The skill name from <available-skills>",
+            },
+        },
+        required = { "name" },
+    },
+}, function(input)
+    if not input.name or input.name == "" then
+        return { success = false, error = "Skill name is required" }
+    end
+    local skills = require("neogent.skills")
+    local result = skills.load(input.name)
+    if result.success then
+        return { success = true, message = result.content }
+    else
+        return { success = false, error = result.error }
+    end
+end)
+
 return M
