@@ -762,7 +762,7 @@ end)
 -- read_file: read file contents
 M.register("read_file", {
     name = "read_file",
-    description = "Read contents of a file. ALWAYS use this before editing a file to understand context and get accurate line numbers. For large files (>500 lines), use start_line/end_line to read specific sections. Returns content with line numbers prefixed. The file will be opened in Neovim so the user can follow along.",
+    description = "Read contents of a file. ALWAYS use this before editing a file to understand context and get accurate line numbers. Returns max 500 lines per call - use start_line/end_line to paginate through larger files. Output shows 'lines X-Y of Z total' and includes continuation hint if truncated.",
     input_schema = {
         type = "object",
         properties = {
@@ -810,13 +810,20 @@ M.register("read_file", {
     end
 
     local lines = vim.fn.readfile(path)
+    local total_lines = #lines
+    local MAX_LINES = 500
 
     local start_line = input.start_line or 1
-    local end_line = input.end_line or #lines
+    local end_line = input.end_line or total_lines
 
     -- Clamp bounds
     start_line = math.max(1, start_line)
-    end_line = math.min(#lines, end_line)
+    end_line = math.min(total_lines, end_line)
+
+    -- Enforce max lines limit
+    if (end_line - start_line + 1) > MAX_LINES then
+        end_line = start_line + MAX_LINES - 1
+    end
 
     local selected = {}
     for i = start_line, end_line do
@@ -824,7 +831,12 @@ M.register("read_file", {
     end
 
     local content = table.concat(selected, "\n")
-    local msg = string.format("File: %s (lines %d-%d)\n%s", path, start_line, end_line, content)
+    local msg = string.format("File: %s (lines %d-%d of %d total)\n%s", path, start_line, end_line, total_lines, content)
+
+    -- Add continuation hint if there's more
+    if end_line < total_lines then
+        msg = msg .. string.format("\n\n[TRUNCATED: Use start_line=%d to read more]", end_line + 1)
+    end
 
     return { success = true, message = msg }
 end)
