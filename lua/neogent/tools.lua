@@ -301,17 +301,42 @@ local function build_search_cmd(input)
 end
 
 local function parse_rg_result(result)
+    local MAX_OUTPUT_LINES = 200
+    local MAX_OUTPUT_BYTES = 50000  -- 50KB
+
     if result.code ~= 0 and result.code ~= 1 then
-        return { success = false, error = result.stderr or "rg failed" }
+        local err = result.stderr or "rg failed"
+        return { success = false, error = "Search failed: " .. err }
     end
 
     local output = result.stdout or ""
     if output == "" then
-        return { success = true, message = "No matches found" }
+        return { success = true, message = "No matches found. Try a different pattern or check the path." }
+    end
+
+    -- Cap by bytes first
+    local truncated_by_bytes = false
+    if #output > MAX_OUTPUT_BYTES then
+        output = output:sub(1, MAX_OUTPUT_BYTES)
+        truncated_by_bytes = true
     end
 
     local lines = vim.split(output, "\n", { trimempty = true })
-    return { success = true, message = table.concat(lines, "\n") }
+    local total_lines = #lines
+    local truncated_by_lines = false
+
+    if #lines > MAX_OUTPUT_LINES then
+        lines = vim.list_slice(lines, 1, MAX_OUTPUT_LINES)
+        truncated_by_lines = true
+    end
+
+    local msg = table.concat(lines, "\n")
+
+    if truncated_by_bytes or truncated_by_lines then
+        msg = msg .. string.format("\n\n[TRUNCATED: Results exceeded limits (%d lines shown). Use 'glob' to filter files or narrow your pattern.]", #lines)
+    end
+
+    return { success = true, message = msg }
 end
 
 M.register_async("search_files", {
@@ -491,6 +516,20 @@ function M.apply_line_replacement(lines, from_line, to_line, new_lines)
 end
 
 -- Shared helpers
+local function validate_path(path)
+    if not path or path == "" then
+        return nil, "Path is required and cannot be empty"
+    end
+    if type(path) ~= "string" then
+        return nil, "Path must be a string"
+    end
+    -- Check for null bytes (security)
+    if path:find("\0") then
+        return nil, "Path contains invalid characters"
+    end
+    return true, nil
+end
+
 local function resolve_path(path)
     if not path:match("^/") then
         return vim.fn.getcwd() .. "/" .. path
@@ -665,12 +704,12 @@ end
 
 M.register_async("write_file", {
     name = "write_file",
-    description = "Create a new file with the specified content. IMPORTANT: This tool FAILS if the file already exists - use replace_lines to edit existing files. Shows a diff view for user approval before writing. Use this only for creating new files, not for modifying existing ones.",
+    description = "Create a new file with the specified content. IMPORTANT: This tool FAILS if the file already exists - use edit_file to modify existing files. Shows a diff view for user approval before writing.",
     input_schema = {
         type = "object",
         properties = {
             path = { type = "string", description = "File path (absolute or relative to cwd)" },
-            content = { type = "string", description = "File content" },
+            content = { type = "string", description = "Complete file content to write" },
         },
         required = { "path", "content" },
     },
@@ -681,12 +720,14 @@ function(input)
 end,
 -- async executor
 function(input, callback)
-    if not input.path then
-        callback({ success = false, error = "Missing path" })
+    -- Validate path
+    local valid, err = validate_path(input.path)
+    if not valid then
+        callback({ success = false, error = "Invalid path: " .. err })
         return
     end
-    if not input.content then
-        callback({ success = false, error = "Missing content" })
+    if input.content == nil then
+        callback({ success = false, error = "content is required. Provide the complete file content." })
         return
     end
 
@@ -694,7 +735,7 @@ function(input, callback)
 
     -- Fail if file exists
     if vim.fn.filereadable(path) == 1 then
-        callback({ success = false, error = "File already exists: " .. path .. ". Use replace_lines to edit existing files." })
+        callback({ success = false, error = "File already exists: " .. path .. ". Use edit_file to modify existing files." })
         return
     end
 
@@ -737,23 +778,26 @@ function(input)
 end,
 -- async executor
 function(input, callback)
-    if not input.path then
-        callback({ success = false, error = "Missing path" })
+    -- Validate path
+    local valid, err = validate_path(input.path)
+    if not valid then
+        callback({ success = false, error = "Invalid path: " .. err })
         return
     end
-    if not input.old_string then
-        callback({ success = false, error = "Missing old_string" })
+    -- Validate old_string
+    if not input.old_string or input.old_string == "" then
+        callback({ success = false, error = "old_string is required and cannot be empty. Use read_file first to copy the exact text." })
         return
     end
     if input.new_string == nil then
-        callback({ success = false, error = "Missing new_string" })
+        callback({ success = false, error = "new_string is required. Use empty string \"\" to delete text." })
         return
     end
 
     local path = resolve_path(input.path)
 
     if vim.fn.filereadable(path) ~= 1 then
-        callback({ success = false, error = "File not found: " .. path })
+        callback({ success = false, error = "File not found: " .. path .. ". Check the path or use list_files to find it." })
         return
     end
 
@@ -762,14 +806,19 @@ function(input, callback)
     -- Check if old_string exists
     local start_pos, end_pos = content:find(input.old_string, 1, true)
     if not start_pos then
-        callback({ success = false, error = "old_string not found in file. Make sure it matches exactly (including whitespace)." })
+        -- Provide helpful hint about common issues
+        local hint = "Make sure it matches exactly including whitespace and indentation."
+        if input.old_string:find("\n") then
+            hint = hint .. " Multi-line strings must match line endings exactly."
+        end
+        callback({ success = false, error = "old_string not found in file. " .. hint .. " Use read_file to see the exact content." })
         return
     end
 
     -- Check for multiple matches
     local second_match = content:find(input.old_string, end_pos + 1, true)
     if second_match then
-        callback({ success = false, error = "old_string matches multiple locations. Provide more context to make it unique." })
+        callback({ success = false, error = "old_string matches multiple locations (" .. (content:gsub(input.old_string, input.old_string):len() > 0 and "2+" or "2") .. " times). Include more surrounding context to make it unique." })
         return
     end
 
@@ -818,14 +867,16 @@ M.register("read_file", {
         required = { "path" },
     },
 }, function(input)
-    if not input.path then
-        return { success = false, error = "Missing file path" }
+    -- Validate path
+    local valid, err = validate_path(input.path)
+    if not valid then
+        return { success = false, error = "Invalid path: " .. err }
     end
 
     local path = resolve_path(input.path)
 
     if vim.fn.filereadable(path) ~= 1 then
-        return { success = false, error = "File not found: " .. path }
+        return { success = false, error = "File not found: " .. path .. ". Use list_files to find available files." }
     end
 
     -- Follow agent: open file in buffer (without stealing focus)
@@ -912,13 +963,16 @@ end
 local function sanitize_command(input)
     local cmd = input.command
     if not cmd or cmd == "" then
-        return nil, "Missing command"
+        return nil, "command is required. Provide a shell command like 'go test ./...' or 'npm run build'."
+    end
+    if type(cmd) ~= "string" then
+        return nil, "command must be a string"
     end
 
     -- Check blocklist
     local blocked = is_command_blocked(cmd)
     if blocked then
-        return nil, "Command blocked for safety (matches pattern: " .. blocked .. ")"
+        return nil, "Command blocked for safety (matches dangerous pattern). This is a protective measure. Ask the user to run it manually if needed."
     end
 
     -- Validate timeout
@@ -1062,8 +1116,10 @@ function(input)
 end,
 -- async executor
 function(input, callback)
-    if not input.path then
-        callback({ success = false, error = "Missing path" })
+    -- Validate path
+    local valid, err = validate_path(input.path)
+    if not valid then
+        callback({ success = false, error = "Invalid path: " .. err })
         return
     end
 
@@ -1071,7 +1127,7 @@ function(input, callback)
 
     -- Check file exists
     if vim.fn.filereadable(path) ~= 1 then
-        callback({ success = false, error = "File not found: " .. path })
+        callback({ success = false, error = "File not found: " .. path .. ". Use list_files to find available files." })
         return
     end
 
@@ -1150,8 +1206,8 @@ function(input)
 end,
 -- async executor
 function(input, callback)
-    if not input.query then
-        callback({ success = false, error = "Missing query" })
+    if not input.query or input.query == "" then
+        callback({ success = false, error = "query is required. Provide a symbol name to search for (e.g., 'MyClass', 'handleClick')." })
         return
     end
 
@@ -1168,7 +1224,7 @@ function(input, callback)
         end
 
         if not client then
-            callback({ success = false, error = "No LSP server with workspace symbol support found" })
+            callback({ success = false, error = "No LSP server with workspace symbol support found. Open a file of the relevant language first, or use search_files for text-based search." })
             return
         end
 
