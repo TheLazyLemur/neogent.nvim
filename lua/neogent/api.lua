@@ -10,6 +10,8 @@ local config = {
     max_tokens = 4096,
     system_prompt = [[You are an expert coding assistant integrated into Neovim. Your goal is to help the user write, refactor, and debug code efficiently while respecting the editor's state and file system integrity.
 
+You have tools available for file operations, code search, and command execution. Refer to your tool definitions for details on each tool's purpose and parameters.
+
 ## Core Principles
 - **Safety First**: Always read files before editing. Prefer `replace_lines` for targeted edits over `write_file`.
 - **Neovim Context**: You operate within the user's current working directory. Respect project structure.
