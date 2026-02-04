@@ -293,7 +293,7 @@ end
 
 M.register_async("search_files", {
     name = "search_files",
-    description = "Search FILE CONTENTS for a regex pattern using ripgrep. Use 'glob' to filter which files to search. Example: pattern='function foo', glob='*.lua'",
+    description = "Search file contents for a regex pattern using ripgrep. Use this to find definitions, usages, or patterns across the codebase. Always try this before asking 'where is X defined?' Use the 'glob' parameter to filter by file type (e.g., '*.lua', '*.ts'). Returns matching lines with file paths and line numbers.",
     input_schema = {
         type = "object",
         properties = {
@@ -374,7 +374,7 @@ end
 
 M.register_async("list_files", {
     name = "list_files",
-    description = "List files matching a glob pattern. Use this to find files by name/extension, NOT to search file contents.",
+    description = "List files matching a glob pattern. Use this to explore project structure, find files by name or extension, or verify a file exists before reading. Does NOT search file contents - use search_files for that. Examples: '*.lua' (all Lua files), 'src/**/*.ts' (TypeScript in src), '**/test_*.py' (Python test files).",
     input_schema = {
         type = "object",
         properties = {
@@ -626,7 +626,7 @@ end
 
 M.register_async("write_file", {
     name = "write_file",
-    description = "Create a new file. Fails if file already exists. Use replace_lines to edit existing files.",
+    description = "Create a new file with the specified content. IMPORTANT: This tool FAILS if the file already exists - use replace_lines to edit existing files. Shows a diff view for user approval before writing. Use this only for creating new files, not for modifying existing ones.",
     input_schema = {
         type = "object",
         properties = {
@@ -681,7 +681,7 @@ end)
 -- replace_lines: patch-like line replacement with diff view
 M.register_async("replace_lines", {
     name = "replace_lines",
-    description = "Replace a range of lines in a file. Shows diff for user approval. Use from_line > to_line to insert before from_line. Use empty text to delete lines.",
+    description = "Replace a range of lines in an existing file. ALWAYS read_file first to get accurate line numbers. Shows a diff view for user approval. Preferred tool for editing existing files. Set from_line > to_line to INSERT before from_line. Use empty text to DELETE lines. Line numbers are 1-indexed and inclusive.",
     input_schema = {
         type = "object",
         properties = {
@@ -762,7 +762,7 @@ end)
 -- read_file: read file contents
 M.register("read_file", {
     name = "read_file",
-    description = "Read contents of a file. If follow_agent is enabled, the file will be opened in neovim so the user can see it.",
+    description = "Read contents of a file. ALWAYS use this before editing a file to understand context and get accurate line numbers. For large files (>500 lines), use start_line/end_line to read specific sections. Returns content with line numbers prefixed. The file will be opened in Neovim so the user can follow along.",
     input_schema = {
         type = "object",
         properties = {
@@ -886,7 +886,7 @@ end
 
 M.register_async("run_command", {
     name = "run_command",
-    description = "Execute a shell command asynchronously. Use for running tests, builds, git commands, or checking project state. Commands are sandboxed with safety restrictions.",
+    description = "Execute a shell command in the project root. Use for running tests (e.g., 'go test ./...', 'npm test'), builds, linters, git commands, or checking project state. Dangerous commands (rm -rf /, mkfs, etc.) are blocked. Max timeout 2 minutes. Returns stdout, stderr, and exit code.",
     input_schema = {
         type = "object",
         properties = {
@@ -996,7 +996,7 @@ end)
 -- document_symbols: list all symbols in a file via LSP
 M.register_async("document_symbols", {
     name = "document_symbols",
-    description = "List all symbols (functions, classes, variables, etc.) in a file using LSP. Requires an LSP server to be attached to the buffer.",
+    description = "List all symbols (functions, classes, methods, variables, etc.) in a specific file using LSP. Use this to understand file structure before editing, or to find the line number of a specific function/class. More accurate than text search for code navigation. Requires an LSP server for the file type.",
     input_schema = {
         type = "object",
         properties = {
@@ -1084,7 +1084,7 @@ end)
 -- workspace_symbols: search for symbols by name across the workspace via LSP
 M.register_async("workspace_symbols", {
     name = "workspace_symbols",
-    description = "Search for symbols by name across the workspace using LSP. Requires an LSP server with workspace symbol support.",
+    description = "Search for symbols by name across the entire project using LSP. Use this to find where a function, class, or type is defined globally. More accurate than grep for finding definitions. Supports partial matching. Returns symbol name, kind, file path, and line number. Requires an LSP server with workspace symbol support.",
     input_schema = {
         type = "object",
         properties = {
