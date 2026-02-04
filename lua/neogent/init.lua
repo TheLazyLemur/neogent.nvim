@@ -25,6 +25,16 @@ local default_config = {
     skills_paths = nil, -- additional skill directories (list)
 }
 
+-- Format error content for tool results, including output message if present
+function M.format_tool_error_content(result)
+    local content = "Error: " .. result.error
+    if result.message and result.message ~= "" then
+        content = content .. "\n\n" .. result.message
+    end
+    content = content .. "\n\nYou may retry with different parameters or ask the user for help."
+    return content
+end
+
 function M.setup(opts)
     config = vim.tbl_extend("force", default_config, opts or {})
     api.configure({
@@ -313,7 +323,7 @@ function M._handle_tool_use(tool_uses)
                 table.insert(tool_results, {
                     type = "tool_result",
                     tool_use_id = tool_use.id,
-                    content = "Error: " .. result.error .. ". You may retry with different parameters or ask the user for help.",
+                    content = M.format_tool_error_content(result),
                     is_error = true,
                 })
             end
