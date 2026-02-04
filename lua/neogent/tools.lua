@@ -262,6 +262,29 @@ local function build_search_cmd(input)
     local max_results = input.max_results or 50
     table.insert(cmd, "--max-count=" .. max_results)
 
+    -- Output mode
+    local output_mode = input.output_mode or "content"
+    if output_mode == "files" then
+        table.insert(cmd, "--files-with-matches")
+    elseif output_mode == "count" then
+        table.insert(cmd, "--count")
+    end
+
+    -- Context lines
+    if input.context then
+        table.insert(cmd, "-C")
+        table.insert(cmd, tostring(input.context))
+    else
+        if input.before then
+            table.insert(cmd, "-B")
+            table.insert(cmd, tostring(input.before))
+        end
+        if input.after then
+            table.insert(cmd, "-A")
+            table.insert(cmd, tostring(input.after))
+        end
+    end
+
     if input.glob then
         table.insert(cmd, "--glob")
         table.insert(cmd, input.glob)
@@ -293,13 +316,13 @@ end
 
 M.register_async("search_files", {
     name = "search_files",
-    description = "Search file contents for a regex pattern using ripgrep. Use this to find definitions, usages, or patterns across the codebase. Always try this before asking 'where is X defined?' Use the 'glob' parameter to filter by file type (e.g., '*.lua', '*.ts'). Returns matching lines with file paths and line numbers.",
+    description = "Search file contents for a regex pattern using ripgrep. Use this to find definitions, usages, or patterns across the codebase. Always try this before asking 'where is X defined?' Supports context lines to see surrounding code and different output modes.",
     input_schema = {
         type = "object",
         properties = {
             pattern = {
                 type = "string",
-                description = "Regex pattern to search for IN FILE CONTENTS. NOT a file glob. Examples: 'function\\s+\\w+', 'TODO', 'import.*react'",
+                description = "Regex pattern to search for IN FILE CONTENTS. Examples: 'function\\s+\\w+', 'TODO', 'import.*react'",
             },
             path = {
                 type = "string",
@@ -307,11 +330,27 @@ M.register_async("search_files", {
             },
             glob = {
                 type = "string",
-                description = "Filter FILES by glob pattern. Examples: '*.lua', '*.ts', '**/*.md'. This filters which files to search, NOT what to search for.",
+                description = "Filter by file glob pattern. Examples: '*.lua', '*.ts', '**/*.md'",
+            },
+            output_mode = {
+                type = "string",
+                description = "Output format: 'content' (default, shows matching lines), 'files' (file paths only), 'count' (match count per file)",
+            },
+            context = {
+                type = "number",
+                description = "Lines of context before AND after each match. Use this to see surrounding code.",
+            },
+            before = {
+                type = "number",
+                description = "Lines of context BEFORE each match (use instead of context for asymmetric)",
+            },
+            after = {
+                type = "number",
+                description = "Lines of context AFTER each match (use instead of context for asymmetric)",
             },
             max_results = {
                 type = "number",
-                description = "Max results to return. Default 50.",
+                description = "Max results per file. Default 50.",
             },
         },
         required = { "pattern" },
@@ -678,24 +717,23 @@ function(input, callback)
     end)
 end)
 
--- replace_lines: patch-like line replacement with diff view
-M.register_async("replace_lines", {
-    name = "replace_lines",
-    description = "Replace a range of lines in an existing file. ALWAYS read_file first to get accurate line numbers. Shows a diff view for user approval. Preferred tool for editing existing files. Set from_line > to_line to INSERT before from_line. Use empty text to DELETE lines. Line numbers are 1-indexed and inclusive.",
+-- edit_file: string-based replacement (more robust than line numbers)
+M.register_async("edit_file", {
+    name = "edit_file",
+    description = "Edit a file by replacing an exact string match. More robust than line-based edits because line numbers can shift. ALWAYS read_file first, then copy the exact text you want to replace (including whitespace/indentation). Shows diff for user approval.",
     input_schema = {
         type = "object",
         properties = {
             path = { type = "string", description = "File path (absolute or relative to cwd)" },
-            from_line = { type = "number", description = "Start line (1-indexed)" },
-            to_line = { type = "number", description = "End line (1-indexed, inclusive). Set < from_line to insert before from_line" },
-            text = { type = "string", description = "Replacement text (can be empty to delete lines)" },
+            old_string = { type = "string", description = "Exact string to find and replace. Must match exactly including whitespace." },
+            new_string = { type = "string", description = "Replacement string. Can be empty to delete the old_string." },
         },
-        required = { "path", "from_line", "to_line", "text" },
+        required = { "path", "old_string", "new_string" },
     },
 },
 -- sync executor
 function(input)
-    return { success = false, error = "replace_lines requires async execution" }
+    return { success = false, error = "edit_file requires async execution" }
 end,
 -- async executor
 function(input, callback)
@@ -703,41 +741,42 @@ function(input, callback)
         callback({ success = false, error = "Missing path" })
         return
     end
-    if not input.from_line then
-        callback({ success = false, error = "Missing from_line" })
+    if not input.old_string then
+        callback({ success = false, error = "Missing old_string" })
         return
     end
-    if not input.to_line then
-        callback({ success = false, error = "Missing to_line" })
-        return
-    end
-    if input.text == nil then
-        callback({ success = false, error = "Missing text" })
+    if input.new_string == nil then
+        callback({ success = false, error = "Missing new_string" })
         return
     end
 
     local path = resolve_path(input.path)
 
-    -- File must exist for replace_lines
     if vim.fn.filereadable(path) ~= 1 then
         callback({ success = false, error = "File not found: " .. path })
         return
     end
 
-    local original_lines = vim.fn.readfile(path)
-    local new_lines = vim.split(input.text, "\n", { plain = true })
+    local content = table.concat(vim.fn.readfile(path), "\n")
 
-    -- Handle empty text as deletion (empty array)
-    if input.text == "" then
-        new_lines = {}
+    -- Check if old_string exists
+    local start_pos, end_pos = content:find(input.old_string, 1, true)
+    if not start_pos then
+        callback({ success = false, error = "old_string not found in file. Make sure it matches exactly (including whitespace)." })
+        return
     end
 
-    local proposed_lines = M.apply_line_replacement(
-        original_lines,
-        input.from_line,
-        input.to_line,
-        new_lines
-    )
+    -- Check for multiple matches
+    local second_match = content:find(input.old_string, end_pos + 1, true)
+    if second_match then
+        callback({ success = false, error = "old_string matches multiple locations. Provide more context to make it unique." })
+        return
+    end
+
+    -- Apply replacement
+    local new_content = content:sub(1, start_pos - 1) .. input.new_string .. content:sub(end_pos + 1)
+    local original_lines = vim.split(content, "\n", { plain = true })
+    local proposed_lines = vim.split(new_content, "\n", { plain = true })
 
     vim.schedule(function()
         open_diff_view(
@@ -745,10 +784,7 @@ function(input, callback)
             proposed_lines,
             input.path,
             function(result)
-                local response = { success = true, message = string.format(
-                    "Replaced lines %d-%d in %s",
-                    input.from_line, input.to_line, input.path
-                )}
+                local response = { success = true, message = "Edit applied to " .. input.path }
                 if result and result.errors and #result.errors > 0 then
                     response.diagnostics = result.errors
                 end
@@ -1171,6 +1207,102 @@ function(input, callback)
             callback({ success = true, message = table.concat(lines, "\n") })
         end)
     end)
+end)
+
+-- get_buffer: get info about current buffer the user is viewing
+M.register("get_buffer", {
+    name = "get_buffer",
+    description = "Get information about the buffer the user currently has open. Returns file path, cursor position, total lines, and optionally the visual selection. Use this to understand what the user is looking at before making suggestions.",
+    input_schema = {
+        type = "object",
+        properties = {
+            include_selection = {
+                type = "boolean",
+                description = "If true and user has a visual selection, include the selected text. Default false.",
+            },
+            include_content = {
+                type = "boolean",
+                description = "If true, include buffer content around cursor (50 lines). Default false.",
+            },
+        },
+        required = {},
+    },
+}, function(input)
+    -- Get the editor window (not our UI windows)
+    local editor_win = ui.get_editor_win()
+    if not editor_win or not vim.api.nvim_win_is_valid(editor_win) then
+        -- Fallback: find a non-UI buffer
+        for _, win in ipairs(vim.api.nvim_list_wins()) do
+            local buf = vim.api.nvim_win_get_buf(win)
+            if vim.bo[buf].buftype == "" then
+                editor_win = win
+                break
+            end
+        end
+    end
+
+    if not editor_win then
+        return { success = false, error = "No editor buffer found" }
+    end
+
+    local buf = vim.api.nvim_win_get_buf(editor_win)
+    local path = vim.api.nvim_buf_get_name(buf)
+    local cursor = vim.api.nvim_win_get_cursor(editor_win)
+    local total_lines = vim.api.nvim_buf_line_count(buf)
+
+    local result = {
+        path = path ~= "" and path or "[No Name]",
+        cursor_line = cursor[1],
+        cursor_col = cursor[2] + 1,
+        total_lines = total_lines,
+        filetype = vim.bo[buf].filetype,
+    }
+
+    -- Include visual selection if requested
+    if input.include_selection then
+        local mode = vim.fn.mode()
+        if mode == "v" or mode == "V" or mode == "\22" then
+            local start_pos = vim.fn.getpos("v")
+            local end_pos = vim.fn.getpos(".")
+            local start_line = math.min(start_pos[2], end_pos[2])
+            local end_line = math.max(start_pos[2], end_pos[2])
+            local selected_lines = vim.api.nvim_buf_get_lines(buf, start_line - 1, end_line, false)
+            result.selection = {
+                start_line = start_line,
+                end_line = end_line,
+                text = table.concat(selected_lines, "\n"),
+            }
+        end
+    end
+
+    -- Include content around cursor if requested
+    if input.include_content then
+        local start_line = math.max(1, cursor[1] - 25)
+        local end_line = math.min(total_lines, cursor[1] + 25)
+        local lines = vim.api.nvim_buf_get_lines(buf, start_line - 1, end_line, false)
+        local numbered = {}
+        for i, line in ipairs(lines) do
+            local line_num = start_line + i - 1
+            local marker = line_num == cursor[1] and ">" or " "
+            table.insert(numbered, string.format("%s%d: %s", marker, line_num, line))
+        end
+        result.content = table.concat(numbered, "\n")
+    end
+
+    -- Format output
+    local msg = string.format("Buffer: %s\nCursor: line %d, col %d\nTotal lines: %d\nFiletype: %s",
+        result.path, result.cursor_line, result.cursor_col, result.total_lines, result.filetype or "none")
+
+    if result.selection then
+        msg = msg .. string.format("\n\nSelection (lines %d-%d):\n%s",
+            result.selection.start_line, result.selection.end_line, result.selection.text)
+    end
+
+    if result.content then
+        msg = msg .. "\n\nContent around cursor:\n" .. result.content
+    end
+
+    return { success = true, message = msg }
 end)
 
 return M

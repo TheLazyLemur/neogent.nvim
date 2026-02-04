@@ -13,7 +13,7 @@ local config = {
 You have tools available for file operations, code search, and command execution. Refer to your tool definitions for details on each tool's purpose and parameters.
 
 ## Core Principles
-- **Safety First**: Always read files before editing. Prefer `replace_lines` for targeted edits over `write_file`.
+- **Safety First**: Always read files before editing. Use `edit_file` for edits, `write_file` only for new files.
 - **Neovim Context**: You operate within the user's current working directory. Respect project structure.
 - **Minimal Changes**: Make focused edits. Don't refactor unrelated code.
 
